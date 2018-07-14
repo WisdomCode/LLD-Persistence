@@ -96,36 +96,39 @@ youdidit() { zenity --info --title "Finished" --text "Congratulations, you now h
 
 
 createper() {
-#create partition:
-offset=$(($(cat /sys/block/$usbdev/$partition/start)+$(cat /sys/block/$usbdev/$partition/size)))
-parted -s $usbdev unit s mkpart primary $offset 100%
-partition=$(ls $usbdev? | tail -n 1 | sed 's=/dev/==g')
+if ! lsblk --fs  | grep -q "$partition.*crypto_LUKS"
+	then
+	#create partition:
+	offset=$(($(cat /sys/block/$usbdev/$partition/start)+$(cat /sys/block/$usbdev/$partition/size)))
+	parted -s $usbdev unit s mkpart primary $offset 100%
+	partition=$(ls $usbdev? | tail -n 1 | sed 's=/dev/==g')
 
-#Create Password
-PASS=$(createpassword)
-(
-printf "$PASS\n" | cryptsetup luksFormat /dev/$partition
-printf "$PASS\n" | cryptsetup luksOpen /dev/$partition persistent
-mkfs.ext4 -L persistent /dev/mapper/persistent
-) | waiting "Preparing Persistence" "Creating encrypted space for persistent Data. This should take less than a minute"
-zenitychoice=$(choosing)
-(
-mkdir /media/persistent
-mount /dev/mapper/persistent /media/persistent
-IFS='|' read -r -a choices <<< "$zentitychoice"
-for element in "${choices[@]}"
-do
-	if [ "$element" = "Persistent Folder"]
-		then mkdir "${persource[$element]}"
-	fi
-	mkdir -p /media/persistent/${perdest[$element]}
-	rsync -a "${persource[$element]}" "/media/persistent/${perdest[$element]}"
-done
-echo "$zentitychoice" > /media/persistence/perconf
-umount /media/persistent
-cryptsetup luksClose persistent
-) | waiting "Copying Data" "The Data of your current Session is now copied to the persistent Storage.\nThis takes Time depending on how much Data you have aquired and how fast your Stick is."
-youdidit
+	#Create Password
+	PASS=$(createpassword)
+	(
+	printf "$PASS\n" | cryptsetup luksFormat /dev/$partition
+	printf "$PASS\n" | cryptsetup luksOpen /dev/$partition persistent
+	mkfs.ext4 -L persistent /dev/mapper/persistent
+	) | waiting "Preparing Persistence" "Creating encrypted space for persistent Data. This should take less than a minute"
+	zenitychoice=$(choosing)
+	(
+	mkdir /media/persistent
+	mount /dev/mapper/persistent /media/persistent
+	IFS='|' read -r -a choices <<< "$zentitychoice"
+	for element in "${choices[@]}"
+	do
+		if [ "$element" = "Persistent Folder"]
+			then mkdir "${persource[$element]}"
+		fi
+		mkdir -p /media/persistent/${perdest[$element]}
+		rsync -a "${persource[$element]}" "/media/persistent/${perdest[$element]}"
+	done
+	echo "$zentitychoice" > /media/persistence/perconf
+	umount /media/persistent
+	cryptsetup luksClose persistent
+	) | waiting "Copying Data" "The Data of your current Session is now copied to the persistent Storage.\nThis takes Time depending on how much Data you have aquired and how fast your Stick is."
+	youdidit
+fi
 }
 
 
@@ -147,6 +150,9 @@ then
 		if [ "$element" = "Network" ]
 			then systemctl restart network-manager.service
 		fi
+		if [ "$element" = "Printer" ]
+			then systemctl restart cups.service
+		fi
 	done
 fi
 }
@@ -158,8 +164,10 @@ then
 	if [ -d "/media/persistent" ]
 		then umount /media/persistent
 	fi
+	(
 	shred -vzn 0 /dev/$partition
 	parted -s $usbdev rm "${partition: -1}"
+	) | waiting "Erasing" "The Persistent storage gets now erased securely. This can take a while, depending on how much there is.\nWhen this window is closing, its finished.\nDo not turn off your PC until then."
 fi
 
 case "$1" in
